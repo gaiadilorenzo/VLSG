@@ -198,11 +198,13 @@ class Scan3rDinov2Generator():
     def generateFeatures(self):
         img_num = 0
         self.feature_generation_time = 0.0
-        for scan_id in tqdm(self.scan_ids[3:]):
+        for scan_id in tqdm(self.scan_ids):
+            out_file = osp.join(self.out_dir, '{}.pkl'.format(scan_id))
+            if osp.exists(out_file) and not self.override:
+                continue
             with torch.no_grad():
                 imgs_features = self.generateFeaturesEachScan(scan_id)
             img_num += len(imgs_features)
-            out_file = osp.join(self.out_dir, '{}.pkl'.format(scan_id))
             common.write_pkl_data(imgs_features, out_file)
         # log
         log_str = "Feature generation time: {:.3f}s for {} images, {:.3f}s per image\n".format(
@@ -213,6 +215,7 @@ class Scan3rDinov2Generator():
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess Scan3R')
     parser.add_argument('--config', type=str, default='', help='Path to the config file')
+    parser.add_argument('--override', action='store_true', help='Override existing annotations')
     return parser.parse_known_args()
 
 def main():

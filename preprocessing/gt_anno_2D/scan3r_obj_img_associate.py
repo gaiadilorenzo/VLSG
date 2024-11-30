@@ -98,9 +98,14 @@ class Scan3ROBJAssociator():
     def annotate_scans(self):
         self.patch_annos_scans = {}
         for scan_idx in tqdm(range(len(self.scan_ids))):
-            patch_annos_scan = self.annotate(scan_idx, self.step)
-            self.patch_annos_scans[scan_idx] = patch_annos_scan
-            
+            patch_anno_file = osp.join(self.anno_out_dir, "{}.pkl".format(self.scan_ids[scan_idx]))
+            if osp.exists(patch_anno_file) and not self.cfg.override:
+                patch_annos_scan = common.load_pkl_data(patch_anno_file)
+                self.patch_annos_scans[scan_idx] = patch_annos_scan
+            else:
+                patch_annos_scan = self.annotate(scan_idx, self.step)
+                self.patch_annos_scans[scan_idx] = patch_annos_scan
+                
         # save file
         for scan_idx in tqdm(range(len(self.scan_ids))):
             scan_id = self.scan_ids[scan_idx]
@@ -110,6 +115,7 @@ class Scan3ROBJAssociator():
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess Scan3R')
     parser.add_argument('--config', type=str, default='', help='Path to the config file')
+    parser.add_argument('--override', action='store_true', help='Override existing files')
     return parser.parse_known_args()
         
 if __name__ == '__main__':

@@ -58,6 +58,10 @@ class Scan3RIMGProjector():
     def project(self, scan_idx, step = 1):
         # get related files
         scan_id = self.scan_ids[scan_idx]
+        save_scan_pkl_dir = osp.join(self.save_pkl_dir, "{}.pkl".format(scan_id))
+        
+        if osp.exists(save_scan_pkl_dir) and not args.override:
+            return
         mesh_file = osp.join(self.scans_scenes_dir, scan_id, "labels.instances.annotated.v2.ply")
         imgs_folder = osp.join(self.scans_scenes_dir, scan_id, "sequence")
         intrinsic_file = osp.join(imgs_folder, "_info.txt")
@@ -69,7 +73,19 @@ class Scan3RIMGProjector():
         img_height = int(camera_info['height'])
         
         # load labels
-        plydata_npy = np.load(osp.join(self.scans_scenes_dir, scan_id, "data.npy"))
+        
+        ply_data_npy_file = osp.join(self.scans_scenes_dir, scan_id, "data.npy")
+        plydata_npy = None
+
+        if osp.isfile(ply_data_npy_file):
+            plydata_npy = np.load(ply_data_npy_file)
+        else:
+            plydata_npy = scan3r.save_ply_data(
+                self.scans_scenes_dir,
+                scan_id,
+                "labels.instances.annotated.v2.ply",
+                ply_data_npy_file,
+            )
         obj_labels = plydata_npy['objectId']
     
         # load mesh
@@ -121,7 +137,6 @@ class Scan3RIMGProjector():
             cv2.imwrite(obj_id_img_file, obj_id_img)
             cv2.imwrite(color_img_file, color_img)
         ## save scene-level pkl file for efficient loading
-        save_scan_pkl_dir = osp.join(self.save_pkl_dir, "{}.pkl".format(scan_id))
         common.write_pkl_data(obj_id_imgs, save_scan_pkl_dir)
             
     def segmentResult(self, scene, intrinsics, extrinsics, width, height,
@@ -146,9 +161,14 @@ class Scan3RIMGProjector():
         obj_id_map[hit_triangles_ids_valid_masks] = obj_ids[hit_points_ids_valid]
         return color_map, obj_id_map
     
-        
+def parse_args():
+    parser = argparse.ArgumentParser(description='Scan3R 2D Object Annotation')
+    parser.add_argument('--override', action='store_true', help='Override existing annotations')
+    return parser.parse_args()
+
 if __name__ == '__main__':
     # get Data_ROOT_DIR
+    args = parse_args()
     Data_ROOT_DIR = os.getenv('Data_ROOT_DIR')
     # note that the original validation set includes the resplited val and test set
     scan3r_img_projector = Scan3RIMGProjector(Data_ROOT_DIR, split='validation', use_rescan=True)
