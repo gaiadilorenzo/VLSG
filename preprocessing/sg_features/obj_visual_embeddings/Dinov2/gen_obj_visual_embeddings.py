@@ -43,6 +43,9 @@ from dataclasses import dataclass
 #     device = torch.device("cuda")
 # larg = tyro.cli(LocalArgs)
 
+from sklearn.cluster import KMeans
+import numpy as np
+
 # openmask3d multi-level functions
 def mask2box(mask: torch.Tensor):
     row = torch.nonzero(mask.sum(axis=0))[:, 0]
@@ -161,13 +164,9 @@ class ObjVisualEmbGen(data.Dataset):
         common.ensure_dir(self.obj_visual_emb_dir)
         
         # get device 
-        if not torch.cuda.is_available(): raise RuntimeError('No CUDA devices available.')
-        self.device = torch.device("cuda")
         
         desc_layer = 31
         desc_facet = "value"
-        device = torch.device("cuda")
-        self.device = torch.device("cuda")
         
         # Dinov2 extractor
         if "extractor" in globals():
@@ -186,21 +185,25 @@ class ObjVisualEmbGen(data.Dataset):
                 
     def generateObjVisualEmb(self):
         for scan_id in tqdm.tqdm(self.scan_ids):
-            obj_patch_info = self.generateObjVisualEmbScan(scan_id)
             obj_visual_emb_file = osp.join(self.obj_visual_emb_dir, "{}.pkl".format(scan_id))
+            if osp.exists(obj_visual_emb_file):
+                continue
+            obj_patch_info = self.generateObjVisualEmbScan(scan_id)
             common.write_pkl_data(obj_patch_info, obj_visual_emb_file)
             
     def generateObjVisualEmbScan(self, scan_id):
         obj_image_votes = {}
-        
-        # load gt 2D obj anno
+
+        # Load GT 2D object annotations
         obj_anno_2D_file = self.obj_2D_annos_pathes[scan_id]
         obj_anno_2D = common.load_pkl_data(obj_anno_2D_file)
-        
-        # iterate over all frames
+
+        # Load image poses (assume poses are stored in self.image_poses[scan_id])
+        image_poses = scan3r.load_frame_poses(osp.join(self.data_root_dir, "scenes"), scan_id, tuple(obj_anno_2D.keys()), type="quat_trans")
+
         for frame_idx in obj_anno_2D:
             obj_2D_anno_frame = obj_anno_2D[frame_idx]
-            ## process 2D anno
+            # Process 2D annotations
             obj_ids, counts = np.unique(obj_2D_anno_frame, return_counts=True)
             for idx in range(len(obj_ids)):
                 obj_id = obj_ids[idx]
@@ -212,27 +215,58 @@ class ObjVisualEmbGen(data.Dataset):
                 if frame_idx not in obj_image_votes[obj_id]:
                     obj_image_votes[obj_id][frame_idx] = 0
                 obj_image_votes[obj_id][frame_idx] = count
-        ## select top K frames for each obj
+
+        # Select top K diverse frames for each object using pose clustering
         obj_image_votes_topK = {}
         for obj_id in obj_image_votes:
-            obj_image_votes_topK[obj_id] = []
             obj_image_votes_f = obj_image_votes[obj_id]
-            sorted_frame_idxs = sorted(obj_image_votes_f, key=obj_image_votes_f.get, reverse=True)
-            if len(sorted_frame_idxs) > self.cfg.data.obj_img.topk:
-                obj_image_votes_topK[obj_id] = sorted_frame_idxs[:self.cfg.data.obj_img.topk]
+
+            # Collect poses and corresponding votes
+            frame_idxs = list(obj_image_votes_f.keys())
+            poses = np.array([image_poses[frame_idx] for frame_idx in frame_idxs])
+            votes = np.array([obj_image_votes_f[frame_idx] for frame_idx in frame_idxs])
+
+            # Cluster poses into 10 groups (or fewer if frames are limited)
+            num_clusters = min(10, len(frame_idxs))
+            if len(poses) > 1:
+                kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+                cluster_labels = kmeans.fit_predict(poses)
             else:
-                obj_image_votes_topK[obj_id] = sorted_frame_idxs
-        ## get obj visual emb
+                cluster_labels = np.zeros(len(poses))  # All in one cluster if only one pose
+
+            # Select the best frame from each cluster based on votes
+            top_frames = []
+            for cluster_id in range(num_clusters):
+                cluster_frame_idxs = [
+                    frame_idxs[i]
+                    for i in range(len(frame_idxs))
+                    if cluster_labels[i] == cluster_id
+                ]
+                cluster_votes = [
+                    obj_image_votes_f[frame_idx] for frame_idx in cluster_frame_idxs
+                ]
+                if cluster_votes:
+                    # Select the frame with the highest votes in this cluster
+                    best_frame_idx = cluster_frame_idxs[np.argmax(cluster_votes)]
+                    top_frames.append(best_frame_idx)
+
+            # Sort top frames by votes for consistency
+            top_frames = sorted(top_frames, key=obj_image_votes_f.get, reverse=True)
+            obj_image_votes_topK[obj_id] = top_frames[: self.topk]
+
+        # Get object visual embeddings
         obj_visual_emb = {}
         for obj_id in obj_image_votes_topK:
             obj_image_votes_topK_frames = obj_image_votes_topK[obj_id]
             obj_visual_emb[obj_id] = {}
             for frame_idx in obj_image_votes_topK_frames:
                 obj_visual_emb[obj_id][frame_idx] = self.generate_visual_emb(
-                    scan_id, frame_idx, obj_id, obj_anno_2D[frame_idx])    
+                    scan_id, frame_idx, obj_id, obj_anno_2D[frame_idx]
+                )
+
         obj_patch_info = {
-            'obj_visual_emb': obj_visual_emb,
-            'obj_image_votes_topK': obj_image_votes_topK,
+            "obj_visual_emb": obj_visual_emb,
+            "obj_image_votes_topK": obj_image_votes_topK,
         }
         return obj_patch_info
     
