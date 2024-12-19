@@ -11,7 +11,7 @@
 
 import torch
 import torch.nn as nn
-from timm.models.layers import trunc_normal_, DropPath, to_2tuple
+from timm.models.layers import DropPath
 from mmcv.runner import load_checkpoint
 from mmdet.models.builder import BACKBONES
 from mmdet.utils import get_root_logger

@@ -7,8 +7,6 @@ sys.path.append(src_dir)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# 2D image feature extractor
-from GCVit.models import gc_vit
 # 3D scene graph feature extractor
 from src.models.sg_encoder import MultiModalEncoder
 # model utils
@@ -95,6 +93,8 @@ class PatchSGIEAligner(nn.Module):
         # backbone 
         self.backbone = backbone
         if num_reduce > 0:
+            # 2D image feature extractor
+            from GCVit.models import gc_vit
             reduce_list = [gc_vit.ReduceSize(dim=backbone_dim, keep_dim=True)
                                 for i in range(num_reduce)]
             self.reduce_layers = nn.Sequential(*reduce_list)

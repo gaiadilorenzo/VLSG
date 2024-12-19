@@ -168,6 +168,9 @@ class ObjVisualEmbGen(data.Dataset):
         desc_layer = 31
         desc_facet = "value"
         
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        self.device = device
+        
         # Dinov2 extractor
         if "extractor" in globals():
             print(f"Extractor already defined, skipping")
@@ -186,7 +189,7 @@ class ObjVisualEmbGen(data.Dataset):
     def generateObjVisualEmb(self):
         for scan_id in tqdm.tqdm(self.scan_ids):
             obj_visual_emb_file = osp.join(self.obj_visual_emb_dir, "{}.pkl".format(scan_id))
-            if osp.exists(obj_visual_emb_file):
+            if osp.exists(obj_visual_emb_file) and not args.override:
                 continue
             obj_patch_info = self.generateObjVisualEmbScan(scan_id)
             common.write_pkl_data(obj_patch_info, obj_visual_emb_file)
@@ -271,38 +274,22 @@ class ObjVisualEmbGen(data.Dataset):
         return obj_patch_info
     
     def generate_visual_emb(self, scan_id, frame_idx, obj_id, gt_anno):
-        if self.img_rotate:
-            obj_2D_anno_f_rot = gt_anno.transpose(1, 0)
-            obj_2D_anno_f_rot = np.flip(obj_2D_anno_f_rot, 1)
-        # load image
         image_path = self.image_path[scan_id][frame_idx]
         image = Image.open(image_path)
-        if self.img_rotate:
-            image = image.transpose(Image.ROTATE_270)
-        if self.vis:
-            image.show()
-            cv2.imshow("obj_2D_anno_f_rot", np.array(obj_2D_anno_f_rot))
         # get obj mask
-        obj_mask = obj_2D_anno_f_rot == obj_id
+        obj_mask = gt_anno == obj_id
         # extract multi-level crop dinov2 features
         start = time.time()
-        images_crops = []
-        for level in range(num_of_levels):
-            mask_tensor = torch.from_numpy(obj_mask).float()
-            x1, y1, x2, y2 = mask2box_multi_level(mask_tensor, level, multi_level_expansion_ratio)
-            cropped_img = image.crop((x1, y1, x2, y2))
-            cropped_img = cropped_img.resize((224, 224), Image.BICUBIC)
-            img_pt = self.base_tf(cropped_img)
-            images_crops.append(img_pt)
-        # extract clip emb
-        if(len(images_crops) > 0):
-            image_input =torch.stack(images_crops).to(self.device)
-            with torch.no_grad():
-                ret = self.extractor(image_input) # [num_levels, 1+num_patches, desc_dim]  
-                # get cls token
-                cls_token = ret[:, 0, :]
-                # get mean of all patches
-                mean_patch = cls_token.mean(dim=0)
+        mask_tensor = torch.from_numpy(obj_mask).float()
+        masked_image = Image.fromarray((np.array(mask_tensor) * np.array(image).transpose(2, 0, 1)).astype(np.uint8).transpose(1, 2, 0))
+        masked_image = masked_image.resize((224, 224), Image.BICUBIC)
+        masked_image = self.base_tf(masked_image).to(self.device).unsqueeze(0)
+        with torch.no_grad():
+            ret = self.extractor(masked_image) # [1, 1+num_patches, desc_dim]  
+            # get cls token
+            cls_token = ret[:, 0, :]
+            # get mean of all patches
+            mean_patch = cls_token.mean(dim=0)
         self.time_used += time.time() - start
         return mean_patch.cpu().detach().numpy()
         
@@ -313,6 +300,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess Scan3R')
     parser.add_argument('--config', type=str, default='', help='Path to the config file')
     parser.add_argument('--split', type=str, default='train', help='split')
+    parser.add_argument('--override', action="store_true", help='Override existing annotations')
     return parser.parse_known_args()
     
 if __name__ == '__main__':

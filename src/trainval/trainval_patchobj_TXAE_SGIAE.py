@@ -1,13 +1,10 @@
 import argparse
 import time
 import os
-from collections import OrderedDict
 import sys
-from IPython import embed
 import numpy as np
 import subprocess
 
-from zmq import has
 src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ws_dir = os.path.dirname(src_dir)
 sys.path.append(src_dir)
@@ -19,8 +16,8 @@ from engine import EpochBasedTrainer
 # models
 import torch
 import torch.optim as optim
-from mmdet.models import build_backbone
-from mmcv import Config
+# from mmdet.models import build_backbone
+# from mmcv import Config
 # from models.GCVit.models import gc_vit
 from models.patch_SGIE_aligner import PatchSGIEAligner
 from models.lossE import get_loss, get_val_room_retr_loss

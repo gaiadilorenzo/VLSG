@@ -1,21 +1,15 @@
-import os
 import os.path as osp
-from weakref import ref
-from attr import assoc
-import comm
 import numpy as np
 import random
 import albumentations as A
 import torch
 import torch.utils.data as data
-from torchvision.transforms import transforms
 import cv2
 import sys
 import scipy
 import tqdm
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
-from yaml import scan
 
 sys.path.append('..')
 sys.path.append('../..')
@@ -204,6 +198,8 @@ class PatchObjectPairXTAESGIDataSet(data.Dataset):
         self.image_paths = {}
         for scan_id in self.scan_ids:
             self.image_paths[scan_id] = scan3r.load_frame_paths(self.scans_dir, scan_id, self.step)
+        print("Loaded {} scans".format(len(self.scan_ids)))
+        
         # load 2D frame poses
         self.image_poses = {}
         for scan_id in self.scan_ids:
@@ -289,6 +285,7 @@ class PatchObjectPairXTAESGIDataSet(data.Dataset):
             
         # generate data items given multiple scans
         self.data_items = self.generateDataItems()
+        print("Loaded {} data items".format(len(self.data_items)))
 
     def load3DSceneGraphs(self):
         # load scene graph
